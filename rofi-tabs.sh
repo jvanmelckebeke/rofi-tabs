@@ -2,23 +2,42 @@
 
 # This script is a simple tab switcher for rofi. It uses the brotab command to manage tabs
 
-get_clients() {
-  # brotab clients returns:
-  # <prefix> <host> <pid> <browser>
-  # example:
-  # a.	localhost:4625	11992	chrome/chromium
-  #
-  # we need to return prefix and browser
-  echo $(bt clients | awk '{print $1, $4}')
+detect_wm() {
+  # Detect the currently running window manager
+  if [ ! -z "$XDG_CURRENT_DESKTOP" ]; then
+    echo "$XDG_CURRENT_DESKTOP"
+  elif [ ! -z "$DESKTOP_SESSION" ]; then
+    echo "$DESKTOP_SESSION"
+  else
+    wmctrl -m | grep -oP '(?<=Name: )\w+'
+  fi
 }
 
 focus_window() {
-  # uses i3-msg to focus the window with the given title
-  # $1 is the title of the window
-  
-  escaped_title=$(echo "$1" | sed 's/"/\\"/g')
+  # Focus the window with the given title using the appropriate command for the detected window manager
+  local title="$1"
+  local wm="$2"
+  local escaped_title
 
-  output=$(i3-msg "[title=\"$escaped_title\"] focus")
+  escaped_title=$(echo "$title" | sed 's/"/\\"/g')
+
+  case "$wm" in
+    i3|i3wm)
+      i3-msg "[title=\"$escaped_title\"] focus" &> /dev/null
+      ;;
+    sway)
+      swaymsg "[title=\"$escaped_title\"] focus" &> /dev/null
+      ;;
+    GNOME|gnome)
+      wmctrl -a "$title"
+      ;;
+    KDE|kde|plasma)
+      qdbus org.kde.KWin /KWin org.kde.KWin.activateWindow "$(qdbus org.kde.KWin /KWin org.kde.KWin.windowForTitle "$title")"
+      ;;
+    *)
+      echo "Window manager not supported: $wm" >&2
+      ;;
+  esac
 }
 
 get_tabs() {
@@ -26,35 +45,35 @@ get_tabs() {
   # <prefix> <tab title> <url>
   # return only tab title
 
-  tabs=$(bt list | awk -F '\t' '{printf "%s\n", $2}')
-
-  echo "New Tab"
-
+  local tabs
+  tabs=$(bt list | awk -F '\t' '{print $2}')
+  
   echo "$tabs"
-
 }
 
-# if the script gets called with a non-empty argument then we want to switch to that tab
-if [ -n "$@" ] && [ ! -z "$@" ]; then
+switch_to_tab() {
+  local tab_title="$1"
+  local wm="$2"
 
-  # check if the argument is not empty
-
-  # get the tab title
-  tab_title=$(echo "$@")
-
-  # if the tab title is "New Tab" then we want to open a new tab
-  if [ "$tab_title" = "New Tab" ]; then
-    bt new
-  else
-    # otherwise we want to switch to the tab
-    # first we need to get the prefix
-    prefix=$(bt list | grep "$tab_title" | awk '{print $1}')
+  local prefix
+  prefix=$(bt list | grep -F "$tab_title" | awk '{print $1}')
+  if [ -n "$prefix" ]; then
     bt activate "$prefix"
-    focus_window "$tab_title"
+    focus_window "$tab_title" "$wm"
+  else
+    echo "Tab not found: $tab_title" >&2
+    exit 1
   fi
-  exit 0
+}
+
+# Detect the current window manager
+wm=$(detect_wm)
+
+# if the script gets called with a non-empty argument then we want to switch to that tab
+if [ -n "$1" ]; then
+  switch_to_tab "$1" "$wm"
 else
   # if the script is called without an argument then we want to list the tabs
   get_tabs
-
 fi
+
