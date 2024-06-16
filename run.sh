@@ -1,3 +1,3 @@
 #!/bin/env bash
 
-rofi -show tabs -modes "tabs:./rofi-tabs.sh"
+rofi -show tab -modes "tab:./rofi-tabs.sh" -config ~/.config/rofi/arc_dark_transparent_colors.rasi
